@@ -10,11 +10,14 @@ def scaled_dot_attention(Q: torch.tensor, K: torch.tensor, V: torch.tensor, mask
     Parameters
     ----------
     Q : torch.Tensor
-        Query tensor of shape (batch, seq_len, d_k) or (seq_len, d_k)
+        Query tensor of shape (..., Seq_Len_Q, d_k).
+        The leading dimensions (...) typically represent (Batch, Heads).
     K : torch.Tensor
-        Key tensor of shape (batch, seq_len, d_k) or (seq_len, d_k)
+        Key tensor of shape (..., Seq_Len_K, d_k).
+        The d_k dimension must match Q.
     V : torch.Tensor
-        Value tensor of shape (batch, seq_len, d_v) or (seq_len, d_v)
+        Value tensor of shape (..., Seq_Len_K, d_v).
+        The Seq_Len_K dimension must match K.
     mask : torch.Tensor, optional
         Mask tensor of shape (seq_len, seq_len). 
         Positions with False/0 will be masked (set to -inf)
