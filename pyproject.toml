@@ -1,30 +1,49 @@
+[build-system]
+# Standard way to specify the build backend (Setuptools)
+requires = ["setuptools>=61.0.0"]
+build-backend = "setuptools.build_meta"
+
+# ======================================================================
+# [PROJECT] - Core Metadata & Dependencies (The Standard for Packaging)
+# ======================================================================
 [project]
-name = "my_mac_pytorch_project"
+name = "transformer-from-scratch" # Refactored to match your project name
 version = "0.1.0"
-description = "A project using PyTorch with Apple MPS and uv"
+description = "Modern Transformer implementation from scratch using PyTorch"
+readme = "README.md" # Good practice: assumes you have a README
 authors = [
     { name = "Rui Sa Pereira", email = "you@example.com" }
 ]
-requires-python = ">=3.10" 
+requires-python = ">=3.10"
 license = { text = "MIT" }
-
-# ----------------------------------------------------------------------
-# Core Dependencies (MOVED to the [project] table)
-# ----------------------------------------------------------------------
-dependencies = [
-    # PyTorch Core Packages (Strictly Pinned for Reproducibility)
-    "torch==2.9.0",
-    "torchvision==0.24.0",
-    "torchaudio==2.9.0",
-    # NumPy Pin (Crucial for C-API compatibility with PyTorch)
-    "numpy>=1.26.0,<2.0.0",
-    "tqdm",
-    "jupyter>=1.1.1",
-    "ipykernel>=7.1.0",
+keywords = ["pytorch", "transformer", "attention"] # Added relevant keywords
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Development Status :: 3 - Alpha",
 ]
 
 # ----------------------------------------------------------------------
-# Optional Dependencies (REMAINS in [project.optional-dependencies])
+# Core Dependencies
+# ----------------------------------------------------------------------
+dependencies = [
+    # PyTorch Core Packages (You may want to use broad pins like <2.10.0
+    # for stability, or remove pins if you rely on uv/pip to resolve latest)
+    "torch==2.9.0",
+    "torchvision==0.24.0",
+    "torchaudio==2.9.0",
+    # NumPy Pin (Good for compatibility check)
+    "numpy>=1.26.0,<2.0.0",
+    # Utilities
+    "tqdm",
+    "jupyter>=1.1.1",
+    "ipykernel>=7.1.0",
+    "matplotlib>=3.10.8",
+]
+
+# ----------------------------------------------------------------------
+# Optional Dependencies (The 'dev' group for development tools)
 # ----------------------------------------------------------------------
 [project.optional-dependencies]
 dev = [
@@ -32,3 +51,42 @@ dev = [
     "black>=24.0",
     "ruff>=0.5.0",
 ]
+
+
+# ======================================================================
+# [TOOL] - Configuration for Tools (Best Practice: Tool Configuration)
+# ======================================================================
+
+# --- uv configuration (Optional, but useful for consistency) ---
+[tool.uv]
+# Set environment variables for macOS MPS support here, if necessary,
+# though usually handled at runtime or via environment variables.
+
+# --- Black configuration (Code Formatter) ---
+[tool.black]
+line-length = 88
+target-version = ["py310"]
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.venv
+  | \.mypy_cache
+  | \.pytest_cache
+)/
+'''
+
+# --- Ruff configuration (Linter and Complexity Checker) ---
+[tool.ruff]
+line-length = 88
+select = ["E", "F", "B", "I", "UP"] # Common rule sets: Errors, Flakes, Bugbear, Imports, PyUpgrade
+ignore = []
+
+[tool.ruff.per-file-ignores]
+# Example: ignore unused imports (F401) in __init__.py files
+"__init__.py" = ["F401"]
+# Example: ignore certain rules in test files
+"tests/*.py" = ["E501"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
