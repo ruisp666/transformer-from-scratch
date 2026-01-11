@@ -25,18 +25,20 @@ class RoPE(nn.Module):
 
         # Rotate
         freq_bank_rope = torch.exp(torch.tensor(1j) * angles) 
-        self.register_buffer('freq_bank_rope', freq_bank_rope.unsqueeze(0).unsqueeze(2))
+
+        # Adjust for the (batch, head,seq_len,dim)
+        self.register_buffer('freq_bank_rope', freq_bank_rope.unsqueeze(0).unsqueeze(0))
 
 
     def forward(self, X, style='interleaved'):
          if style == 'interleaved':
+
             # Interleave, complexify, and rotate
             new_shape = (*X.size()[:-1],-1, 2)
             X_complex = torch.view_as_complex(X.reshape(new_shape))
-            print(self.freq_bank_rope.shape)
             X_rotated = X_complex * self.freq_bank_rope
 
-            # Move back to real and reshape as original
+            # Move back to real and reshape as original 
             return torch.view_as_real(X_rotated).reshape_as(X) 
          elif style == 'half-split':
             # Half-split, complexify, and rotate

@@ -2,9 +2,7 @@ import torch.nn as nn
 import torch
 import torch.functional as F
 from transformer_from_scratch.scaled_attention import scaled_dot_attention
-from transformer_from_scratch.multi_head_attention_rope import RoPE
-
-
+from transformer_from_scratch.rotary_positional_embeddings import RoPE
 
 
 class MultiHeadAttentionROPE(nn.Module):
@@ -26,6 +24,8 @@ class MultiHeadAttentionROPE(nn.Module):
 
         # Calculate  head dimension
         head_dim = d_model//num_heads
+        assert head_dim%2==0, f'The head dimension {d_model//num_heads} should be an even number'
+
 
         # Create projection matrices (no bias)
         self.W_q = nn.Linear(d_model, d_model, bias=False)
@@ -34,7 +34,7 @@ class MultiHeadAttentionROPE(nn.Module):
         self.W_o = nn.Linear(d_model, d_model, bias=False)
 
         # RoPE Layer
-        self.rope = RoPE(d_model, seq_len)
+        self.rope = RoPE(seq_len=seq_len, d_model=head_dim)
 
         # Dropout Layer
         self.dropout = nn.Dropout(p=dropout)

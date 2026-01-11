@@ -13,13 +13,13 @@ def tests_attention():
     V = torch.randn(batch_size, seq_len, dim_model )
     output, attention_w = scaled_dot_attention(Q,K,V,None)
     print(attention_w.sum(dim=-1))
-    print(torch.ones([batch_size, seq_len]))
-    print(torch.allclose(attention_w.sum(dim=-1), torch.ones([batch_size, seq_len], dypte=torch.float), 1e-5))
+    print(torch.ones((batch_size, seq_len)))
+    print(torch.allclose(attention_w.sum(dim=-1), torch.ones(batch_size, seq_len), 1e-5))
 
 
 def test_shapes_multihead():
     batch_size = 5
-    dim_model = 12
+    dim_model = 24
     num_heads = 4
     seq_len = 5
     shape_1 = batch_size, seq_len, dim_model
@@ -31,5 +31,5 @@ def test_shapes_multihead():
     
 
 if __name__ == '__main__':
-    tests_attention()
+    test_shapes_multihead()
 
