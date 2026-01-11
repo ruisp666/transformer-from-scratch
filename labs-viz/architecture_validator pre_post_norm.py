@@ -21,6 +21,7 @@ def get_pca_explained_variance(s):
     variance = s**2
     return (variance / variance.sum()).detach().numpy()
 
+
 def test_svds():
     d_model = 32
     n_layers = 40
