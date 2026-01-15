@@ -1,7 +1,7 @@
 import torch.nn as nn
 import torch
 import torch.functional as F
-from transformer_from_scratch.scaled_attention import scaled_dot_attention
+from transformer_from_scratch.multi_head_attention import scaled_dot_attention
 from transformer_from_scratch.rotary_positional_embeddings import RoPE
 
 
