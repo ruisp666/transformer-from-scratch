@@ -31,21 +31,26 @@ class RoPE(nn.Module):
 
 
     def forward(self, X, style='interleaved'):
+         # Introduced this stuff for inference to work
+         T = X.shape[2]
+         freqs_sliced = self.freq_bank_rope[..., :T, :]
          if style == 'interleaved':
 
             # Interleave, complexify, and rotate
             new_shape = (*X.size()[:-1],-1, 2)
             X_complex = torch.view_as_complex(X.reshape(new_shape))
-            X_rotated = X_complex * self.freq_bank_rope
+            X_rotated = X_complex * freqs_sliced
 
             # Move back to real and reshape as original 
             return torch.view_as_real(X_rotated).reshape_as(X) 
          elif style == 'half-split':
             # Half-split, complexify, and rotate
-            x1 = X[..., :self.d_model//2]
-            x2 = X[..., self.d_model//2:]
+            # Use the actual shape of x
+            half_split = X.shape[1]//2
+            x1 = X[..., :half_split]
+            x2 = X[..., half_split:]
             X_complex = torch.complex(x1, x2)
-            X_rotated = X_complex * self.freq_bank_rope
+            X_rotated = X_complex * freqs_sliced
 
             # Extract real and imag and concat at hidden dim
             return torch.cat([X_rotated.real, X_rotated.imag], dim=-1)
