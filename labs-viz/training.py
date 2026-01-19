@@ -2,14 +2,18 @@ import torch
 from transformer_from_scratch.config import TrainingConfig
 from transformer_from_scratch.trainer import Trainer
 from transformer_from_scratch.transformer import ModernTransformer
-from transformer_from_scratch.data_pipeline import get_shakespeare_loaders
+from transformer_from_scratch.data_utils import get_text_loaders
 
 
 def main():
     # Config
-    cfg = TrainingConfig.base()
+    cfg = TrainingConfig.tinystories()
 
-    train_loader, val_loader, vocab_size = get_shakespeare_loaders(batch_size=cfg.batch_size,seq_len=cfg.seq_len)
+    train_loader, val_loader, vocab_size = get_text_loaders(
+        file_path=cfg.input_file_path,
+        batch_size=cfg.batch_size,
+        seq_len=cfg.seq_len
+    )
 
     # 3. Model
     model = ModernTransformer(

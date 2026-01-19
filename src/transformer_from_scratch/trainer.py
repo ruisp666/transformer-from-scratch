@@ -81,15 +81,36 @@ class Trainer:
             self.step_num += 1
             self.tokens_processed += x.numel()
             
+            # 1. Fast Logs (Every 10 steps) - Just print speed/loss
             if self.step_num % self.cfg.log_interval == 0:
                 self.log_metrics(loss, grad_norm)
             
-            # [NEW] Log a text sample every 500 steps to see progress
-            if self.step_num % 500 == 0:
+            # 2. Heavy Logs (Every eval_interval, e.g. 500 steps)
+            # This is the "Industry Standard" check-up
+            if self.step_num % self.cfg.eval_interval == 0:
+                print(f"\n[Step {self.step_num}] Running Mid-Epoch Evaluation...")
+                
+                # A. Validate (Check against data the model hasn't seen)
+                val_loss = self.evaluate()
+                print(f"Step {self.step_num} | Val Loss: {val_loss:.4f}")
+
+                # B. Generate Text (Visual check in wandb)
                 self.log_sample_text()
 
-            if self.step_num % self.cfg.save_interval == 0:
-                self.save_checkpoint(f"step_{self.step_num}")
+                is_milestone = (self.step_num % 5000 == 0)
+                
+                # C. Save Checkpoint (Safety)
+                self.save_checkpoint(f"step_{self.step_num}", is_permanent=is_milestone)
+
+                # D. Log everything to WandB
+                if wandb and wandb.run:
+                    wandb.log({
+                        "val_loss": val_loss,
+                        "step": self.step_num
+                    })
+
+                # Switch back to train mode after evaluation!
+                self.model.train()
 
     def train_step(self, x, y):
         """
@@ -117,7 +138,7 @@ class Trainer:
 
         return loss.item(), grad_norm.item()
     
-    def evaluate(self):
+    def evaluate(self, max_batches=100):
         """
         Runs validation on the hold-out set.
         """
@@ -126,7 +147,10 @@ class Trainer:
         steps = 0
         
         with torch.no_grad():
-            for x, y in self.val_loader:
+            for i, (x, y) in enumerate(self.val_loader):
+
+                if i > max_batches:
+                    break
                 x, y = x.to(self.device), y.to(self.device)
                 logits = self.model(x)
                 B, T, V = logits.shape
@@ -195,17 +219,31 @@ class Trainer:
         # 5. Switch back to Train Mode!
         self.model.train()
 
-    def save_checkpoint(self, tag):
+def save_checkpoint(self, tag, is_permanent=False):
         """
-        Saves model state and config.
+        Saves model state. 
+        - Always overwrites 'latest.pt' (for crash recovery).
+        - Only creates a timestamped file if is_permanent=True.
         """
         Path("checkpoints").mkdir(exist_ok=True)
         
-        path = f"checkpoints/{self.cfg.run_name}_{tag}.pt"
-        torch.save({
+        # Data to save
+        checkpoint = {
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
             'config': self.cfg,
-            'step': self.step_num
-        }, path)
-        print(f"Saved checkpoint: {path}")
+            'step': self.step_num,
+            'val_loss': self.best_val_loss if hasattr(self, 'best_val_loss') else None
+        }
+        
+        # 1. Always save/overwrite 'latest.pt'
+        latest_path = f"checkpoints/{self.cfg.run_name}_latest.pt"
+        torch.save(checkpoint, latest_path)
+        
+        # 2. If it's a special milestone, save a permanent copy
+        if is_permanent:
+            archive_path = f"checkpoints/{self.cfg.run_name}_{tag}.pt"
+            torch.save(checkpoint, archive_path)
+            print(f"Saved ARCHIVE checkpoint: {archive_path}")
+        else:
+            print(f"Updated latest checkpoint: {latest_path}")
