@@ -219,31 +219,31 @@ class Trainer:
         # 5. Switch back to Train Mode!
         self.model.train()
 
-def save_checkpoint(self, tag, is_permanent=False):
-        """
-        Saves model state. 
-        - Always overwrites 'latest.pt' (for crash recovery).
-        - Only creates a timestamped file if is_permanent=True.
-        """
-        Path("checkpoints").mkdir(exist_ok=True)
-        
-        # Data to save
-        checkpoint = {
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'config': self.cfg,
-            'step': self.step_num,
-            'val_loss': self.best_val_loss if hasattr(self, 'best_val_loss') else None
-        }
-        
-        # 1. Always save/overwrite 'latest.pt'
-        latest_path = f"checkpoints/{self.cfg.run_name}_latest.pt"
-        torch.save(checkpoint, latest_path)
-        
-        # 2. If it's a special milestone, save a permanent copy
-        if is_permanent:
-            archive_path = f"checkpoints/{self.cfg.run_name}_{tag}.pt"
-            torch.save(checkpoint, archive_path)
-            print(f"Saved ARCHIVE checkpoint: {archive_path}")
-        else:
-            print(f"Updated latest checkpoint: {latest_path}")
+    def save_checkpoint(self, tag, is_permanent=False):
+            """
+            Saves model state. 
+            - Always overwrites 'latest.pt' (for crash recovery).
+            - Only creates a timestamped file if is_permanent=True.
+            """
+            Path("checkpoints").mkdir(exist_ok=True)
+            
+            # Data to save
+            checkpoint = {
+                'model_state_dict': self.model.state_dict(),
+                'optimizer_state_dict': self.optimizer.state_dict(),
+                'config': self.cfg,
+                'step': self.step_num,
+                'val_loss': self.best_val_loss if hasattr(self, 'best_val_loss') else None
+            }
+            
+            # 1. Always save/overwrite 'latest.pt'
+            latest_path = f"checkpoints/{self.cfg.run_name}_latest.pt"
+            torch.save(checkpoint, latest_path)
+            
+            # 2. If it's a special milestone, save a permanent copy
+            if is_permanent:
+                archive_path = f"checkpoints/{self.cfg.run_name}_{tag}.pt"
+                torch.save(checkpoint, archive_path)
+                print(f"Saved ARCHIVE checkpoint: {archive_path}")
+            else:
+                print(f"Updated latest checkpoint: {latest_path}")
