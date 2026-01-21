@@ -36,7 +36,7 @@ def scaled_dot_attention(Q: torch.tensor, K: torch.tensor, V: torch.tensor, mask
     d = Q.shape[-1]
     query_times_k_scaled = torch.matmul(Q, K.transpose(-2,-1))* d**(-1/2)
     if mask is not None:
-        query_times_k_scaled = query_times_k_scaled.masked_fill(mask==0, 1e9)
+        query_times_k_scaled = query_times_k_scaled.masked_fill(mask==0, float('-inf'))
     attention_w = F.softmax(query_times_k_scaled, dim=-1)
     output = torch.matmul(attention_w, V)
     return output, attention_w
