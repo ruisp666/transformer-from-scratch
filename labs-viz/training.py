@@ -17,7 +17,7 @@ def main():
 
     # 3. Model
     model = ModernTransformer(
-        vocab_size=vocab_size,
+        vocab_size=cfg.vocab_size,
         d_model=cfg.d_model,
         decoder_n=cfg.n_layers,
         n_heads=cfg.n_heads,

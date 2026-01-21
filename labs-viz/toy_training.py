@@ -84,7 +84,7 @@ def run_experiment_loop(task_name="repeat_copy"):
         
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
-    # 3. Define Models in a Dictionary (The Loop Target)
+        # 3. Define Models in a Dictionary (The Loop Target)
     models_config = {
         "1. Baseline (No Pos)": nn.Sequential(
             nn.Embedding(vocab_size, d_model),
