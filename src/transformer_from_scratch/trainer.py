@@ -180,43 +180,48 @@ class Trainer:
 
     def log_sample_text(self):
         """
-        [NEW] Generates a text sample and logs it to WandB.
-        This lets you watch the model learn grammar, then spelling, then meaning.
+        Logs a text sample using Temperature Sampling (not Greedy).
         """
-        if not (wandb and wandb.run): return
-        
-        # 1. Switch to Eval Mode (disable dropout)
         self.model.eval()
         
-        # 2. Setup (Tokenize 'The King said')
+        # 1. Setup
         enc = tiktoken.get_encoding("gpt2")
         start_text = "The King said"
         start_ids = enc.encode(start_text)
         x = torch.tensor([start_ids], dtype=torch.long, device=self.device)
         
-        # 3. Quick Greedy Generation (50 tokens)
-        # We assume inference.py logic here but kept simple for the trainer
-        for _ in range(50):
+        # 2. Generation Loop (Sampling)
+        for _ in range(100): # Generate 100 tokens
             with torch.no_grad():
                 logits = self.model(x)
-                # Crop context if needed (handled by model usually, but simple safety)
-                # Just pluck last token logits
+                
+                # Focus on the last token
                 logits = logits[:, -1, :] 
-                # Greedy sample (argmax) is best for checking training progress
-                next_token = torch.argmax(logits, dim=-1, keepdim=True)
+                
+                # --- THE FIX: Temperature Scaling ---
+                temperature = 0.8 
+                probs = torch.nn.functional.softmax(logits / temperature, dim=-1)
+                
+                # Sample from the distribution (instead of argmax)
+                next_token = torch.multinomial(probs, num_samples=1)
+                
                 x = torch.cat((x, next_token), dim=1)
         
-        # 4. Decode and Log
+        # 3. Decode
         generated_text = enc.decode(x[0].tolist())
         
-        # Create a WandB Table
-        columns = ["Step", "Generated Text"]
-        data = [[self.step_num, generated_text]]
-        table = wandb.Table(data=data, columns=columns)
+        # 4. Print to Console (Immediate feedback!)
+        print(f"\n--- SAMPLE (Step {self.step_num}) ---")
+        print(generated_text)
+        print("---------------------------------------")
         
-        wandb.log({"samples": table})
+        # 5. Log to WandB
+        if wandb and wandb.run:
+            columns = ["Step", "Generated Text"]
+            data = [[self.step_num, generated_text]]
+            table = wandb.Table(data=data, columns=columns)
+            wandb.log({"samples": table})
         
-        # 5. Switch back to Train Mode!
         self.model.train()
 
     def save_checkpoint(self, tag, is_permanent=False):
