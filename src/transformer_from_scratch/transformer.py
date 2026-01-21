@@ -55,3 +55,8 @@ class ModernTransformer(nn.Module):
         # Projects vectors back to the vocabulary size to get logits.
         # Note: We use bias=False, standard for modern LLMs.
         self.linear = nn.Linear(d_model, vocab_size, bias=False)
+
+    def forward(self, X):
+        embeddings = self.embedding_layer(X)
+        last_pre_norm = self.decoders(embeddings)
+        return self.linear(self.final_norm(last_pre_norm))
