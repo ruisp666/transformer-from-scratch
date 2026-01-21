@@ -58,11 +58,11 @@ class AutoRegressive(Dataset):
     def __getitem__(self, idx):
         return self.data[idx: idx + self.seq_len], self.data[idx+1: idx + 1 + self.seq_len]
 
-class AutoRegressive(Dataset):
+class WikiAutoRegressive(Dataset):
     def __init__(self, raw_text, seq_len, encoder):
         # OPTIMIZATION: Convert list to Tensor immediately
         # This makes slicing faster and saves memory
-        self.data = torch.tensor(encoder.encode(raw_text), dtype=torch.long)
+        self.data = torch.tensor(encoder.encode(raw_text, allowed_special={'<|endoftext|>'}), dtype=torch.long)
         self.seq_len = seq_len
 
     def __len__(self):
