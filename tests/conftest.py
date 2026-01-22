@@ -6,9 +6,9 @@ def model_params():
     """Standard hyperparameters for testing."""
     return {
         "d_model": 32,
-        "n_heads": 4,
+        "n_heads": 8,
         "seq_len": 10,
-        "batch_size": 2,
+        "batch_size": 8,
         "dropout": 0.1
     }
 

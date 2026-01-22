@@ -1,5 +1,4 @@
-from transformer_from_scratch.multi_head_attention import MultiHeadAttention
-from transformer_from_scratch.scaled_attention import scaled_dot_attention
+from transformer_from_scratch.multi_head_attention import MultiHeadAttention, scaled_dot_attention
 import torch
 
 def tests_attention():
