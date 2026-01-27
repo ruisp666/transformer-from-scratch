@@ -4,6 +4,31 @@ import torch.functional as F
 from transformer_from_scratch.multi_head_attention import scaled_dot_attention
 from transformer_from_scratch.rotary_positional_embeddings import RoPE
 
+class KVCache(nn.Module):
+    """
+    Implements KVCache.
+    Shape: (2, Max_Size, D_Model) -> (Key/Value, Time, Features)
+    ----------
+    Parameters
+    ----------
+        d_model: Total dimension of the model
+        max_size: Determines the pre-allocation of memory to the cache
+
+    """
+    def __init__(self, d_model: int, max_size: int):
+        super().__init__()
+
+        # The first dimension has (K,V)
+        self.register_buffer('kvcache', torch.zeros(2, max_size, d_model))
+
+    def insert_at_idx(self, idx: int, k=None, v=None):
+            """Inserts V and K at a given idx"""
+            self.kvcache[0, idx] = k.squeeze()
+            self.kvcache[1, idx] = v.squeeze()
+
+    def retrieve_cache(self, idx):
+        return self.kvcache[0, :idx + 1,:], self.kvCache[1, :idx + 1,:]
+
 
 class MultiHeadAttentionROPE(nn.Module):
     """
@@ -21,7 +46,7 @@ class MultiHeadAttentionROPE(nn.Module):
         dropout: Dropout probability (default 0.1)
     """
     def __init__(self, d_model: int, seq_len: int,
-                  num_heads: int, dropout: float = 0.1) -> torch.Tensor:
+                  num_heads: int, dropout: float = 0.1, max_tokens=1024) -> torch.Tensor:
         super().__init__()
 
         # Verify d_model is divisible by num_heads
@@ -43,6 +68,8 @@ class MultiHeadAttentionROPE(nn.Module):
 
         # Dropout Layer
         self.dropout = nn.Dropout(p=dropout)
+
+        self.KVcache = KVCache(d_model, 512)
 
 
         # Store hyperparams
@@ -84,13 +111,14 @@ class MultiHeadAttentionROPE(nn.Module):
         # could use .permute(0,2,1,3)
         return x.transpose(2,1).contiguous().view(x.shape[0], -1, self.d_model )
     
-    def forward(self, x: torch.Tensor, mask: torch.Tensor = None, n_groups=None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, mask: torch.Tensor = None, n_groups=None, kvcache=None, idx=None) -> torch.Tensor:
         """
         Parameters
         ----------
-            x: (batch, seq_len, d_model)
+            x: (batch, seq_len, d_model), or (1, seq_len, d_model) if in inference
             mask: (batch, seq_len, seq_len) or (seq_len, seq_len)
             gqa_g: the number of groups as per Grouped Query Attention
+            kvcache: The KV Cache
 
         Returns
         -------
@@ -99,10 +127,18 @@ class MultiHeadAttentionROPE(nn.Module):
         """
         batch_size, seq_len, _ = x.shape
 
-        # Project to Q, K and V
+        # Project to Q, K and V 
         Q = self.W_q(x)
-        K = self.W_k(x)
-        V = self.W_v(x)
+
+        # If kv cach the batch_dimension is 1
+        if kvcache is not None:
+            k,v = self.W_k(x[:,idx,:]), self.W_v(x[:,idx,:])
+            # This is to do after Roping and split_heads?
+            self.KVcache.insert_at_idx(idx)
+            K, V = self.KVcache.retrieve_cache()
+        else:
+            K = self.W_k(x)
+            V = self.W_v(x)
 
         # Split into heads and apply RoPE shape:  (batch, num_heads, seq_len, head_dim)
         Q = self.split_heads(Q)
@@ -135,8 +171,8 @@ class MultiHeadAttentionROPE(nn.Module):
         else:
 
             # Apply Rope to softmax of Q and Rope to Exp of K (as per RoFormer approach)
-            Q_rope = self.rope(Q)
-            K_rope = self.rope(K)
+            Q_rope = self.rope(Q,offset=None)
+            K_rope = self.rope(K,offset=None)
             mha = scaled_dot_attention(Q_rope,K_rope,V,mask=mask)[0]
 
         # Compute scaled dot with rope and combine heads acros head dimension

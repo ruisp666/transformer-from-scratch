@@ -18,7 +18,7 @@ def load_model(checkpoint_path, device):
     # 1. Load Config
     # We use 'nano' because that matches your trained checkpoints.
     # If you switch to 'base' training later, update this line!
-    config = TrainingConfig.nano() 
+    config = TrainingConfig.tinystories() 
     
     # 2. Initialize Model
     print(f"Initializing model with {config.run_name} config...")
@@ -55,7 +55,7 @@ def load_model(checkpoint_path, device):
 def main():
     # --- Settings ---
     device = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else "cpu"
-q
+
     # --- Robust Path Construction ---
     # Get the directory where THIS script lives (labs-viz/)
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -66,7 +66,7 @@ q
     checkpoint_dir = os.path.join(project_root, 'checkpoints')
     
     # EXACT filename (Check your folder to be sure!)
-    checkpoint_name = "nano-debug_step_9000.pt" 
+    checkpoint_name = "tinystories-base-70M_latest.pt" 
     
     CHECKPOINT_PATH = os.path.join(checkpoint_dir, checkpoint_name)
     

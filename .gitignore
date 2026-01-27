@@ -22,3 +22,10 @@ Scratch_notebook* *.png .azad/
 Scratch_notebook*.ipynb
 *.png
 .azad/
+data/*
+checkpoints/*
+labs-viz/.env
+labs-viz/.env
+labs-viz/checkpoints/
+labs-viz/data/
+wandb/
