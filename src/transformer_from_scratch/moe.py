@@ -62,7 +62,7 @@ class MoELayer(nn.Module):
 
         # Return + x because the full FFN is replaced by the MOE, so it has to flow
         aux_loss = self.load_balancing_loss(gates, dispatch_mask)
-        return output + x, aux_loss
+        return output , aux_loss
 
 
 
