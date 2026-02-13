@@ -50,6 +50,7 @@ We constructed a binary tensor .
 | **Compute** | 3D Weights | Experts are stored as `(N_Exp, In, Out)` parameters to allow `einsum` to process all experts simultaneously. |
 | **Residual** | `output + x` | **Critical:** Tokens that are dropped due to capacity constraints effectively have `output=0`. The residual ensures they survive to the next layer. |
 |**Parameters**| `nn.Parameters`| Implements the initialization from scracth using 3d parameters rather than linear with reshape|
+|**Flat x**|`x.view(-1, d)`| This is a life-saver when doing the tensor operations, we can always reshape at the end|
 
 ### 4. The "Aha" Moment: The Bitmask
 

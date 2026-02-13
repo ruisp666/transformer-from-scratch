@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 class MoELayer(nn.Module):
     """
-    Initializes an MoE'
+    Initializes a sparse MoE'
     layer according
     to the G-sharding paper
     """
@@ -41,7 +41,8 @@ class MoELayer(nn.Module):
         # Get the "Seat Assignment" (dispatch) and "Ticket Value" (combine)
         # dispatch_mask: (Tokens, Experts, Capacity) - Binary
         # combine_weights: (Tokens, Experts, Capacity) - Weighted Probabilities
-        dispatch_mask, combine_weights = self.top2gating(x_flat)
+        # gates for the aux_loss
+        dispatch_mask, combine_weights, gates = self.top2gating(x_flat)
 
         # 3. Dispatch (The "Sort")
         # We move tokens into the expert buffers.
@@ -56,12 +57,12 @@ class MoELayer(nn.Module):
 
         weighted_output = torch.einsum('tec, ecd -> td', combine_weights, expert_output)
 
-        # 6. Reshape
+        # 5. Reshape
         output = weighted_output.view(batch, seq,d_model)
 
         # Return + x because the full FFN is replaced by the MOE, so it has to flow
-        # Without gaps
-        return output + x
+        aux_loss = self.load_balancing_loss(gates, dispatch_mask)
+        return output + x, aux_loss
 
 
 
@@ -92,36 +93,36 @@ class MoELayer(nn.Module):
         capacity = int(num_tokens/self.n_experts * self.capacity_factor)
         capacity = max(capacity, 1)
 
-
         # (T,E) -> (T,E)
         gates = F.softmax(self.gates(x_flat), dim=-1)
     
         # loop implementation is gone (g_1_idx is (T,))
-       # top2_vals: (Batch*Seq, 2)
+        # top2_vals: (Batch*Seq, 2)
         # top2_indices: (Batch*Seq, 2)
         
         top2_vals, top2_indices = torch.topk(gates, k=2)
 
         # Normalize in one line
         # We use softmax on the top-2 scores, or just normalize the raw top-2 sum
-        # (N, 2) / (N, 1) -> Broadcasting handles it
+        # (N, 2) / (N, 1) -> Broadcasting handles it but we keep dim
         top2_weights = top2_vals / top2_vals.sum(dim=-1, keepdim=True)
 
         # Put the conditional with a cumulative sum (one-hot the g_1idx)
-        # This is (T,E) (one-hot across the choices for first ecpert)
+        # This is (T,E) (one-hot across the choices for first expert)
         g_1_idx = F.one_hot(top2_indices[:,0], num_classes=self.n_experts).int()
 
         # This is (T,E) (one-hot) (across the choices for second expert)
         g_2_idx = F.one_hot(top2_indices[:,1], num_classes=self.n_experts)
    
-        # Sum the thing 
+        # Sum how mauch capacity is used at token t (shape is the same)
         g_1_idx_cumsum =torch.cumsum(g_1_idx, dim=0) 
 
         # G_1_idx_cumsum needs to be lower than capacity and the token that selected that expert
-        # Shape is (T,E) (bollean)
+        # Shape is (T,E) (boolean)
         mask_1 = (g_1_idx_cumsum <= capacity) & (g_1_idx> 0)
 
-        # Counts are the sum of Trues, this is the final sum only.
+        # Counts are the sum of True, this is the final sum only.
+        # (T,E) -> E
         counts_1 = mask_1.sum(dim=0)
         g_2_idx_cumsum = torch.cumsum(g_2_idx, dim=0) + counts_1
 
@@ -129,18 +130,20 @@ class MoELayer(nn.Module):
         mask_2 = (g_2_idx_cumsum <= capacity) & (g_2_idx > 0)
        
         # Transform into (token, expert, capacity) (this is one hot for each expert, which slot gets occupied)
-
+        
         # Wo now we can write the capcity as a one-hot vector
+        # And we define the slot as the cumulative effect of round 1 and round 2
         final_slot = mask_1.float() *  g_1_idx_cumsum + mask_2.float() * g_2_idx_cumsum
 
 
         # --- Dispatch Mask ---
         # Transform into (token, expert, capacity)
-        # Now we have (tokens, E) let's one-hot sparsely remove 1 because slots are indeces
-        # Clao because the indeces are going to -1 when the final_slot is zero (not chosen)
+        # Now we have (tokens, E) let's one-hot sparsely remove 1 because slots are indices
+        # Clamp because the indeces are going to -1 when the final_slot is zero (not chosen)
+        # (T,E)-> (T,E,C)
         dispatch_mask = F.one_hot((final_slot - 1).clamp(min=0).long(), num_classes=capacity).float()
 
-        # Now we are at (tokens, E, capacity) now we are moving the tokens from x_flattened
+        # Now we are at (T, E, C) now we are moving the tokens from x_flattened
         final_mask = mask_1 | mask_2
 
         # This kills the "Phantom ones" created by the clamped 0s.
@@ -148,9 +151,11 @@ class MoELayer(nn.Module):
         dispatch_mask = dispatch_mask * final_mask.unsqueeze(-1)
 
         # Combine Weights
+        # (T,E) by default - currently all zeros
         weights = torch.zeros(x_flat.shape[0], self.n_experts)
 
-        # weights is shape (Tokens, n_experts) - currently all zeros
+        # Scatter into weights the values weights into the position
+        # top2_indices
         # top_2_indices is shape (Tokens, 2)
         # top_2_values is shape (Tokens, 2)
         weights_tokens = weights.scatter_(dim=1, index=top2_indices, src=top2_weights)
@@ -158,8 +163,28 @@ class MoELayer(nn.Module):
         # Use the dispatch mask to combine
         combine_weights = dispatch_mask * weights_tokens.unsqueeze(-1)
 
-        # Dispatch times x_flattened
-        return dispatch_mask, combine_weights
+        return dispatch_mask, combine_weights, gates
+    
+    def load_balancing_loss(self, gates, dispatch_mask):
+        """
+        Calculates the auxiliary loss to encourage uniform expert usage.
+        Loss = N * sum(mean_prob_i * fraction_expert_i)
+        """
+
+        # (T, E) -> (E)
+        mean_probs = gates.mean(dim=0) # Average per expert
+
+        # 2. Hard Decisions (Discrete)
+        # "How many tokens ACTUALLY went to Expert A?"
+        N = self.n_experts
+        #sum across tokens and capacity for the expert (Is it too concentrated in a single Expert)
+        # (T, E, C) -> (E)
+        fraction_expert = dispatch_mask.sum(dim=(0,2)) / dispatch_mask.shape[0]
+
+        # Product
+        loss = N * mean_probs @ fraction_expert.T
+        return loss
+
 
 
 
