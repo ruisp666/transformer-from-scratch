@@ -2,7 +2,7 @@ import torch
 from torch import nn
 from transformer_from_scratch.rms_norm import RMSNorm
 # Import your new block
-from sparse_moe_block import SparseMoEBlock
+from transformer_from_scratch.sparse_moe_block import SparseMoEBlock
 
 class SparseMoETransformer(nn.Module):
     """

@@ -4,7 +4,7 @@ import torch
 from transformer_from_scratch.multi_head_attention_rope import MultiHeadAttentionROPE
 from transformer_from_scratch.rms_norm import RMSNorm
 from transformer_from_scratch.decoder import ModernDecoder
-from moe import MoELayer 
+from transformer_from_scratch.moe import MoELayer 
 
 class SparseMoEBlock(ModernDecoder):
     """
