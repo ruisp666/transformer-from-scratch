@@ -2,96 +2,98 @@ from dataclasses import dataclass
 
 @dataclass
 class TrainingConfig:
-    # Model Architecture
-    vocab_size: int = 50304 # GPT-2 vocab size (rounded to nearest multiple of 64 for efficiency)
+    # --- Model Architecture ---
+    vocab_size: int = 50304
     d_model: int = 512
     n_layers: int = 6
     n_heads: int = 8
-    seq_len: int = 256  # Context window
+    seq_len: int = 256
     dropout: float = 0.1
-    expansion_factor=8/3
+    expansion_factor: float = 8/3  # Standard for SwiGLU
     
-    # Training Hyperparameters
+    # --- MoE Hyperparameters (NEW) ---
+    # Defaults set for a small MoE run
+    n_experts: int = 4             # If 1, acts as dense model (conceptually)
+    capacity_factor: float = 1.25  # Buffer capacity (1.0 = strict, >1.0 = slack)
+    aux_loss_coef: float = 0.01    # Load balancing loss weight
+    
+    # --- Training Hyperparameters ---
     epochs: int = 1
     batch_size: int = 32
     lr: float = 3e-4
     weight_decay: float = 1e-1
     
-    # Scheduling (Cosine Warmup)
+    # --- Scheduling ---
     warmup_steps: int = 100
     max_lr: float = 3e-4
     min_lr: float = 3e-5
     
-    # Logging & Checkpoints
+    # --- Logging & Checkpoints ---
     run_name: str = "default_run"
     project_name: str = "llama-scratch-prod"
     log_interval: int = 10
     save_interval: int = 500
-    eval_interval: int = 500  # Evaluate every 500 steps
+    eval_interval: int = 500
     
-    # Data Paths (NEW)
-    input_file_path: str = "data/input.txt" # Default fallback
-    
-    # --- PRESETS -------------------------------------------------------------
+    # --- Data Paths ---
+    input_file_path: str = "data/input.txt"
+
+    # -------------------------------------------------------------------------
+    # PRESETS
+    # -------------------------------------------------------------------------
     
     @classmethod
     def nano(cls):
-        """
-        Tiny config for debugging on CPU/MPS.
-        Target: TinyShakespeare (1MB)
-        """
+        """Debug run on CPU/MPS."""
         return cls(
-            d_model=64,
-            n_layers=4,
-            n_heads=4,
-            seq_len=64,
-            batch_size=32,
-            lr=1e-3,
-            run_name="nano-shakespeare",
-            input_file_path="data/shakespeare_input.txt" # Explicit path
+            d_model=64, n_layers=4, n_heads=4, seq_len=64, 
+            batch_size=32, lr=1e-3, 
+            run_name="nano-debug",
+            input_file_path="data/shakespeare_input.txt",
+            n_experts=2  # Test MoE logic even on nano
         )
 
     @classmethod
     def base(cls):
-        """
-        The 'Base' Llama-style model (approx 70M params).
-        Target: TinyShakespeare (1MB) - Prone to overfitting!
-        """
+        """Standard Llama-style Dense Model (70M)."""
         return cls(
-            d_model=512,
-            n_layers=6,
-            n_heads=8,
-            seq_len=256,
-            batch_size=32, # Kept low for memory safety
-            lr=3e-4,
-            run_name="base-shakespeare",
-            input_file_path="data/shakespeare_input.txt"
+            d_model=512, n_layers=6, n_heads=8, seq_len=256,
+            batch_size=32, lr=3e-4,
+            run_name="base-dense-70M",
+            input_file_path="data/shakespeare_input.txt",
+            n_experts=1 # Effectively dense
         )
 
     @classmethod
     def tinystories(cls):
+        """The Dense Baseline for TinyStories."""
+        return cls(
+            d_model=512, n_layers=6, n_heads=8, seq_len=256,
+            epochs=1, batch_size=32, lr=3e-4,
+            run_name="tinystories-dense-70M",
+            input_file_path="data/tinystories_input.txt",
+            n_experts=1 
+        )
+
+    @classmethod
+    def tinystories_moe(cls):
         """
-        Configuration for the 200MB TinyStories dataset.
-        Architecture: Same as 'Base' (70M params).
-        Target: TinyStories (200MB) - The real pre-training run.
+        The Sparse MoE Run for TinyStories.
+        Same width/depth as dense, but with 4 Experts.
         """
         return cls(
-            # Architecture (Matches Base)
-            d_model=512,
-            n_layers=6,
-            n_heads=8,
-            seq_len=256,
-            dropout=0.1,
+            # Architecture
+            d_model=512, n_layers=6, n_heads=8, seq_len=256,
+            
+            # MoE Specifics
+            n_experts=4,
+            capacity_factor=1.25,
+            aux_loss_coef=0.01,
             
             # Training
-            epochs=1,     # 1 epoch on 200MB is ALOT of steps (~50k steps)
-            batch_size=32,
-            lr=3e-4,
+            epochs=1, batch_size=32, lr=3e-4,
             
             # Run Identity
-            run_name="tinystories-base-70M",
-            project_name="llama-scratch-prod",
-            
-            # The Critical Path
+            run_name="tinystories-moe-4exp",
             input_file_path="data/tinystories_input.txt"
         )
