@@ -42,7 +42,7 @@ class MoELayer(nn.Module):
         # dispatch_mask: (Tokens, Experts, Capacity) - Binary
         # combine_weights: (Tokens, Experts, Capacity) - Weighted Probabilities
         # gates for the aux_loss
-        dispatch_mask, combine_weights, gates = self.top2gating(x_flat)
+        dispatch_mask, combine_weights, gates, router_z_loss = self.top2gating(x_flat)
 
         # 3. Dispatch (The "Sort")
         # We move tokens into the expert buffers.
@@ -60,9 +60,12 @@ class MoELayer(nn.Module):
         # 5. Reshape
         output = weighted_output.view(batch, seq,d_model)
 
-        # Return + x because the full FFN is replaced by the MOE, so it has to flow
+        # Load balancing loss gets added the Router Z-loss
         aux_loss = self.load_balancing_loss(gates, dispatch_mask)
-        return output , aux_loss
+        total_aux_loss = aux_loss +  router_z_loss
+
+
+        return output , total_aux_loss
 
 
 
@@ -94,7 +97,11 @@ class MoELayer(nn.Module):
         capacity = max(capacity, 1)
 
         # (T,E) -> (T,E)
-        gates = F.softmax(self.gates(x_flat), dim=-1)
+        logits = self.gates(x_flat)
+
+        # We introduce Z-loss froom Google Sparse MoE paper
+        router_z_loss = torch.logsumexp(logits, dim=-1).pow(2).mean()
+        gates = F.softmax(logits, dim=-1)
     
         # loop implementation is gone (g_1_idx is (T,))
         # top2_vals: (Batch*Seq, 2)
@@ -152,18 +159,18 @@ class MoELayer(nn.Module):
 
         # Combine Weights
         # (T,E) by default - currently all zeros
-        weights = torch.zeros(x_flat.shape[0], self.n_experts)
+        weights = torch.zeros(x_flat.shape[0], self.n_experts, device=x_flat.device)
 
         # Scatter into weights the values weights into the position
         # top2_indices
         # top_2_indices is shape (Tokens, 2)
         # top_2_values is shape (Tokens, 2)
-        weights_tokens = weights.scatter_(dim=1, index=top2_indices, src=top2_weights)
+        weights_tokens = weights.scatter(dim=1, index=top2_indices, src=top2_weights)
 
         # Use the dispatch mask to combine
         combine_weights = dispatch_mask * weights_tokens.unsqueeze(-1)
 
-        return dispatch_mask, combine_weights, gates
+        return dispatch_mask, combine_weights, gates, router_z_loss
     
     def load_balancing_loss(self, gates, dispatch_mask):
         """
@@ -199,7 +206,7 @@ if __name__=='__main__':
     moe_layer = MoELayer(d_model=d, n_experts=n_experts, capacity_factor=capacity_factor)
     
     print("Running MoE Forward Pass...")
-    output = moe_layer(X)
+    output, loss = moe_layer(X)
     print("Input Shape:", X.shape)
     print("Output Shape:", output.shape)
     print("Success!")
