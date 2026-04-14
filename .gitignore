@@ -32,3 +32,4 @@ wandb/
 **/wandb/
 **/checkpoints/
 **/data/
+reports/claude-proposal-deprecated.md
