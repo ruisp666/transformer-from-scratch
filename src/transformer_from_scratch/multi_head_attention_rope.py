@@ -29,9 +29,10 @@ class MultiHeadAttentionROPE(nn.Module):
                   num_heads: int, dropout: float = 0.1, max_tokens=1024) -> torch.Tensor:
         super().__init__()
 
-        assert d_model % num_heads == 0
+        assert d_model % num_heads == 0, "d_model should be a multiple of n_heads"
         head_dim = d_model // num_heads
-        assert head_dim % 2 == 0
+
+        assert head_dim % 2 == 0, "head_dim should be an even number"
 
         self.W_q = nn.Linear(d_model, d_model, bias=False)
         self.W_k = nn.Linear(d_model, d_model, bias=False)

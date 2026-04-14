@@ -145,7 +145,7 @@ class Trainer:
                 total_aux_loss += aux_loss.item()
                 steps += 1
         
-         # Avoid division by zero if loader is empty
+        # Avoid division by zero if loader is empty
         if steps == 0: return 0.0, 0.0
         return total_ce_loss / steps, total_aux_loss / steps
 
@@ -180,6 +180,8 @@ class Trainer:
                 logits, _ = self._forward(x)
                 
                 # Standard generation logic
+                # Temperature 0.8: slightly below 1.0 to sharpen the distribution
+                # without collapsing to greedy. Logging only — not used in training.
                 logits = logits[:, -1, :] 
                 probs = torch.nn.functional.softmax(logits / 0.8, dim=-1)
                 next_token = torch.multinomial(probs, num_samples=1)
