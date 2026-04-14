@@ -58,7 +58,9 @@ class AutoRegressive(Dataset):
     def __getitem__(self, idx):
         return self.data[idx: idx + self.seq_len], self.data[idx+1: idx + 1 + self.seq_len]
 
-class WikiAutoRegressive(Dataset):
+class WikiAutoRegressiveSequential(Dataset):
+    """Sliding window dataset — overlapping sequences,
+      every token is a sample start."""
     def __init__(self, raw_text, seq_len, encoder):
         # OPTIMIZATION: Convert list to Tensor immediately
         # This makes slicing faster and saves memory
@@ -70,4 +72,21 @@ class WikiAutoRegressive(Dataset):
 
     def __getitem__(self, idx):
         return self.data[idx: idx + self.seq_len], self.data[idx+1: idx + 1 + self.seq_len]
+    
+
+class WikiAutoRegressive(Dataset):
+    """Non-overlapping chunks — each sample starts exactly
+      seq_len after the previous."""
+    def __init__(self, raw_text, seq_len, encoder):
+        # OPTIMIZATION: Convert list to Tensor immediately
+        # This makes slicing faster and saves memory
+        self.data = torch.tensor(encoder.encode(raw_text, allowed_special={'<|endoftext|>'}), dtype=torch.long)
+        self.seq_len = seq_len
+
+    def __len__(self):
+        return len(self.data) // self.seq_len
+
+    def __getitem__(self, idx):
+        start = idx * self.seq_len  # <-- multiply by seq_len to jump to the right chunk
+        return self.data[start: start + self.seq_len], self.data[start+1: start + 1 + self.seq_len]
 
