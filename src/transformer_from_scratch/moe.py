@@ -62,6 +62,10 @@ class MoELayer(nn.Module):
 
         # Load balancing loss gets added the Router Z-loss
         aux_loss = self.load_balancing_loss(gates, dispatch_mask)
+
+        # Z-loss and aux loss share a single coefficient (aux_loss_coef in trainer).
+        # A separate z_loss_coef=0.001 was tested but caused instability on this config.
+        # Single coefficient is simpler and produces stable training — see training logs.
         total_aux_loss = aux_loss +  router_z_loss
 
 
@@ -71,7 +75,7 @@ class MoELayer(nn.Module):
 
     def compute_from_dispatch(self,expert_input):
         """Implements the compute from pre dispatched tensor.
-        x_packed is (E,C,D), weights is (E,C,1)"""
+        expert_input is (E,C,D), weights is (E,C,1)"""
 
         # This is not needed
         # layer_1_experts = self.layer_1.view(self.n_experts, self.ffn_dim, self.d_model)
@@ -119,7 +123,7 @@ class MoELayer(nn.Module):
         g_1_idx = F.one_hot(top2_indices[:,0], num_classes=self.n_experts).int()
 
         # This is (T,E) (one-hot) (across the choices for second expert)
-        g_2_idx = F.one_hot(top2_indices[:,1], num_classes=self.n_experts)
+        g_2_idx = F.one_hot(top2_indices[:,1], num_classes=self.n_experts).int()
    
         # Sum how mauch capacity is used at token t (shape is the same)
         g_1_idx_cumsum =torch.cumsum(g_1_idx, dim=0) 

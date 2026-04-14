@@ -18,10 +18,15 @@ class SparseMoEBlock(ModernDecoder):
     """
     def __init__(self, d_model, n_heads, n_experts, capacity_factor, dropout, seq_len):
         # 1. Initialize Parent
-        # We pass expansion_factor=0 or any dummy value since we'll replace the FFN immediately.
+        # Note: parent __init__ allocates FFNSwiGlu before we delete it here.
+        # expansion_factor=4 is passed to satisfy the parent signature — the value
+        # does not matter since the FFN is immediately replaced by MoELayer.
         super().__init__(d_model, n_heads, dropout, seq_len, expansion_factor=4)
         
         # 2. Remove the Dense FFN (Save memory/params)
+        # Remove the dense FFN allocated by parent to free parameters.
+        # Tokens dropped by MoE capacity constraints survive via the residual
+        # connection in forward() — moe_out=0 means x + 0 = x unchanged.
         del self.swigluffn
         
         # 3. Add the Sparse MoE
