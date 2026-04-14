@@ -147,8 +147,10 @@ class CheckpointAnalyzer:
             
             # Clean up memory
             del model
-            torch.cuda.empty_cache() if torch.cuda.is_available() else None
-        
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            elif torch.backends.mps.is_available():
+                torch.mps.empty_cache()
         return results
     
     def plot_comparison(self, results):

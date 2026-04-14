@@ -64,7 +64,7 @@ generalisation pattern reported in the grokking literature.
 
 ---
 
-## Design choices worth calling out
+## Design choices 
 
 **GQA: pool K/V first, then apply RoPE.** Because RoPE is a linear (per-dimension rotation)
 operation and mean-pooling is linear, the two commute. Applying RoPE after pooling reduces the
@@ -139,6 +139,15 @@ aux loss of ~1.16, close to the theoretical minimum of 1.0 for perfectly balance
 Grad norm spikes are front-loaded (first ~100 steps) and then flat — the signature of a router
 that has found a stable equilibrium. Throughput ~5,800 tokens/sec.
 
+
+**Checkpoint comparison — Dense vs MoE:**
+
+![Checkpoint comparison](labs-viz/plots/checkpoint_comparison.png)
+
+
+MoE non-overlapping reaches near-parity with the dense baseline at 15k steps 
+vs 75k steps — approximately 5× fewer training steps for equivalent perplexity.
+
 ---
 
 ## Training infrastructure
@@ -166,7 +175,6 @@ that has found a stable equilibrium. Throughput ~5,800 tokens/sec.
 
 ```
 src/transformer_from_scratch/
-├── attention_latent.py           # Latent attention variants
 ├── multi_head_attention.py       # Standard MHA
 ├── multi_head_attention_rope.py  # MHA with RoPE + KV cache
 ├── rotary_positional_embeddings.py
