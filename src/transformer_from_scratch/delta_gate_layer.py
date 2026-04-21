@@ -3,82 +3,98 @@ import torch
 import torch.nn.functional as F
 
 
-def delta_chunk_attention(Q: torch.tensor, K: torch.tensor, V: torch.tensor, beta, C, mask=None):
+def delta_chunk_attention(Q: torch.Tensor, K: torch.Tensor, V: torch.Tensor, beta: torch.Tensor, C: int, mask: torch.Tensor = None) -> torch.Tensor:
     """
-    Implements delta chunk attention
+    Implements delta chunk attention.
     
     Parameters
     ----------
     Q : torch.Tensor
-        Query tensor of shape (..., Seq_Len_Q, d_k).
-        The leading dimensions (...) typically represent (Batch, Heads).
+        Projected Query tensor of shape (Batch, Heads, Seq_Len, d_k).
     K : torch.Tensor
-        Key tensor of shape (..., Seq_Len_K, d_k).
+        Projected Key tensor of shape (Batch, Heads, Seq_Len, d_k).
         The d_k dimension must match Q.
     V : torch.Tensor
-        Value tensor of shape (..., Seq_Len_K, d_v).
-        The Seq_Len_K dimension must match K.
+        Projected Value tensor of shape (Batch, Heads, Seq_Len, d_v).
+        The Seq_Len dimension must match K.
+    beta: torch.Tensor
+        Controls forgetting. Shape should be (Batch, Heads, Seq_Len).
+    C: int
+        Size of the chunk in tokens.
     mask : torch.Tensor, optional
         Mask tensor of shape (seq_len, seq_len). 
-        Positions with False/0 will be masked (set to -inf)
-    beta: torch.Tensor
-        Controls forgetting, it should be (batch, num_heads_C,C, C)
-    C: int
-        Size of the chunk in tokens
-
+        Positions with False/0 will be masked (set to -inf).
     
     Returns
     -------
     output : torch.Tensor
-        Attention output of shape matching V
-    attention_weights : torch.Tensor
-        delta attention weights of shape (seq_len, seq_len)
+        Attention output of shape matching V.
     
     Notes
     -----
-    Implements chunked delta gate
+    Implements chunked delta gate.
     """
-    # Normalize L-2 for stability "We don't have softmax to save us anymore"
-    K = F.normalize(K,p=2,dim=-1)
-    V = F.normalize(V,p=2,dim=-1)
-    B, H, seq_len,dim = Q.shape
+    # Normalize L-2 for stability: "We don't have softmax to save us anymore"
+    # Note: Use F.normalize to scale vectors, and apply to Q and K (not V)
+    K = F.normalize(K, p=2, dim=-1)
+    Q = F.normalize(Q, p=2, dim=-1)
+    
+    B, H, seq_len, dim = Q.shape
     if seq_len % C != 0:
         raise ValueError('The chunk size should be a factor of seq_len')
+        
+    num_chunks = seq_len // C
+    
+    # Pre-slice tensors into continuous chunks for faster memory access
+    Q_chunks = Q.view(B, H, num_chunks, C, dim)
+    K_chunks = K.view(B, H, num_chunks, C, dim)
+    V_chunks = V.view(B, H, num_chunks, C, dim)
+    beta_chunks = beta.view(B, H, num_chunks, C)
+        
+    # Initialize state and output matrices
     S = torch.zeros(B, H, dim, dim, device=Q.device, dtype=Q.dtype)
     O = torch.zeros(B, H, seq_len, dim, device=Q.device, dtype=Q.dtype)
+    
+    # Initialize masks and identity matrices
     causal_mask = torch.tril(torch.ones(C, C, device=Q.device, dtype=Q.dtype))
     eye = torch.eye(C, device=Q.device, dtype=Q.dtype).unsqueeze(0).unsqueeze(0)
-    eye_S = torch.eye(dim,  device=Q.device, dtype=Q.dtype).unsqueeze(0).unsqueeze(0)
-    for i in range(seq_len// C):
-        start = i*C
-        end = (i + 1) * C
-        Q_chunk = Q[:,:,start:end,:]
-        K_chunk = K[:,:,start:end,:]
-        V_chunk = V[:,:,start:end,:]
-        beta_chunk = beta[:,:,start:end ]
+    eye_S = torch.eye(dim, device=Q.device, dtype=Q.dtype).unsqueeze(0).unsqueeze(0)
+    
+    for i in range(num_chunks):
+        # Extract the current chunk
+        Q_chunk = Q_chunks[:, :, i, :, :]
+        K_chunk = K_chunks[:, :, i, :, :]
+        V_chunk = V_chunks[:, :, i, :, :]
+        beta_chunk = beta_chunks[:, :, i, :]
+        
         # beta_chunk shape: (B, H, C). We unsqueeze to (B, H, C, 1) to broadcast over dim
         beta_K = beta_chunk.unsqueeze(-1) * K_chunk
-        # A is (C,D)
-        A = torch.tril(beta_K @ K_chunk.transpose(-1,-2),diagonal=-1)
+        
+        # A is (B, H, C, C) - represents token-to-token adjacency within the chunk
+        A = torch.tril(beta_K @ K_chunk.transpose(-1, -2), diagonal=-1)
 
-        # This inverse here (1-A)^-1 is the same as when you compute total effect from a causal adjency matrix A
-        # think about it as the sum of the powers of A (Neumann series)
+        # This inverse here (I-A)^-1 is the same as when you compute total effect from a causal adjacency matrix A
+        # Think about it as the sum of the powers of A (Neumann series)
         T = torch.linalg.solve_triangular(eye - A, eye, upper=False)
+        
         # This is literally a scalar multiplication on the dim vector
         T_pre = T * beta_chunk.unsqueeze(-2)
         W = T_pre @ K_chunk
         U = T_pre @ V_chunk
+        
         # Need to compute output on the input S
-        # O_chunk is (B,H, C, dim)
-        O_chunk  = Q_chunk @ S.transpose(-2,-1) + (Q_chunk @ K_chunk.transpose(-1,-2) * causal_mask) @ (U - W@ S.transpose(-2,-1))
+        # O_chunk is (B, H, C, dim)
+        O_chunk = Q_chunk @ S.transpose(-2, -1) + (Q_chunk @ K_chunk.transpose(-1, -2) * causal_mask) @ (U - W @ S.transpose(-2, -1))
 
-        # S is (dim,dim) so the identity needs to be (dim,dim)
-        S = S @ (eye_S -  W.transpose(-2,-1) @ K_chunk) + U.transpose(-2,-1) @ K_chunk
-        O[:,:,start:end,:] = O_chunk
+        # Update recurrent state S. S is (dim, dim) so the identity needs to be (dim, dim)
+        S = S @ (eye_S - W.transpose(-2, -1) @ K_chunk) + U.transpose(-2, -1) @ K_chunk
+        
+        # Write back to the main output tensor
+        start = i * C
+        end = (i + 1) * C
+        O[:, :, start:end, :] = O_chunk
+        
     return O
-
-    
-
     
 
 
