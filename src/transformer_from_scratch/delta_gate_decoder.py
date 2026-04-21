@@ -8,11 +8,42 @@ import torch
 class DeltaNetDecoder(nn.Module):
     """
     A Modern Delta Net Decoder-Only Block.
+
+    This block serves as a drop-in replacement for a standard Transformer 
+    decoder block. It swaps out standard Multi-Head Attention for a 
+    Chunkwise Delta Gate Layer (Linear Attention), while maintaining the 
+    standard Pre-Norm residual architecture and SwiGLU FFN.
     
-    References:
+    Because the recurrent memory state (S) is encapsulated entirely within 
+    the DeltaNetLayer, this block maintains the standard sequential shape 
+    contract, making it perfectly suited for Hybrid Transformer architectures.
+    Parameters
     ----------
+    d_model : int
+        The total dimension of the residual stream (model width).
+    n_heads : int
+        The number of attention heads. d_model must be divisible by n_heads.
+    dropout : float
+        The dropout probability applied after the delta attention projection.
+    expansion_factor : float
+        The multiplier for the SwiGLU hidden dimension (typically 8/3).
+    chunk_size : int
+        The number of tokens per chunk for parallelized WY representation 
+        updates. The sequence length must be cleanly divisible by this value.
+
+    Shape
+    -----
+    - Input: (Batch, Seq_Len, d_model)
+    - Output: (Batch, Seq_Len, d_model)
     
+    References
+    ----------
+    - Yang et al. (2024), "Parallelizing Linear Transformers with the Delta 
+      Rule over Sequence Length"
+    - Yang et al. (2024), "Gated Delta Networks: Improving Mamba2 with 
+      Delta Rule"
     """
+
     def __init__(self, d_model, n_heads, dropout, expansion_factor, chunk_size):
         super().__init__()
         
@@ -31,7 +62,7 @@ class DeltaNetDecoder(nn.Module):
        
         
     def forward(self, x):
-    
+
         # 1. Pre-Norm -> Causal Attention -> Residual
         # Note: We normalize x BEFORE passing it to attention (Pre-Norm)
         norm_x = self.norm_1(x)
