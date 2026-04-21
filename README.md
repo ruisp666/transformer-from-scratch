@@ -2,8 +2,7 @@
 
 A from-scratch implementation of a modern decoder-only transformer, built as a learning exercise
 to internalise the components of contemporary LLM architectures end-to-end: RoPE, RMSNorm, SwiGLU,
-Grouped-Query Attention, KV caching, and a vectorised sparse Mixture-of-Experts layer. Trained to
-70M parameters on a single M2 Pro (MPS).
+Grouped-Query Attention, KV caching, a vectorised sparse Mixture-of-Experts layer, and Gated Delta Networks (Linear Attention). Trained to 70M parameters on a single M2 Pro (MPS).
 
 This is a pedagogical repository, not a research contribution. The goal was to build every
 component — not just use it — and to verify each one against the properties claimed in the
@@ -23,7 +22,29 @@ original papers.
 | Grouped-Query Attention | Ainslie et al., 2023 | Mean-pooled from MHA checkpoints; 5D broadcast formulation |
 | KV cache | — | Separate prefill and decode paths; pre-allocated tensor |
 | Sparse Top-2 MoE | Shazeer et al., 2017; Lepikhin et al., 2020 | Fully vectorised dispatch via cumsum-as-sort |
+| Gated Delta Networks | Yang et al., 2024a; Yang et al., 2024b; Yang (Blog), 2024 | Linear attention via chunkwise WY representation, gating extension, & fixed-size state |
 | Weight tying | Press & Wolf, 2016 | Embedding and LM head share weights |
+---
+
+## Linear Attention & Gated Delta Networks
+
+### TL;DR: The Conceptual Shift
+Before diving into the math, the architectural shift from standard Multi-Head Attention (MHA) to Linear Attention (like Delta Networks) fundamentally changes how information travels through time:
+
+*   **Standard MHA is direct (*token-to-token*):** It operates as a single-hop routing mechanism. Token $t_{100}$ looks directly at token $t_2$, grabs exactly what it needs, and moves on. This grants perfect, lossless recall but requires an expensive $O(N^2)$ complete graph of connections.
+*   **Linear Attention is cascaded (*token-to-token-to-token*):** It operates as a multi-hop reasoning mechanism. Token $t_{100}$ cannot see $t_2$ directly. Instead, $t_2$ writes into a shared memory state $S$, $t_3$ reads and modifies that state, and so on until $t_{100}$ reads the heavily compounded result. This drops the complexity to $O(N)$ and unlocks deep sequential reasoning, but forces information to survive a continuous game of telephone through a fixed-size state matrix.
+
+### In Practice: The Hardware Reality (Why This Matters)
+This mathematical shift is not just a theoretical flex; it is a strict hardware requirement for modern long-context models. To understand the stakes, consider the memory footprint of a single layer in a base model like Qwen 3.5 ($d_\text{model} = 4096$, $16$ heads, $d_h = 256$) processing a $32,768$ (32K) token sequence:
+
+*   **Standard Attention (The KV Cache):** Must store a perfect record of 2 vectors ($K$ and $V$) per token. 
+    *   $32,768 \text{ tokens} \times 4,096 \text{ dim} \times 2 = \mathbf{268 \text{ million elements}}$.
+    *   In FP16, that is **~536 MB** of VRAM *per layer, per sequence*. At inference, memory grows linearly and compute slows down quadratically ($O(N^2)$) as it scans this massive cache.
+*   **Delta Networks (The Fixed State):** Compresses history into a fixed $d_h \times d_h$ matrix per head.
+    *   $16 \text{ heads} \times 256 \times 256 = \mathbf{1.04 \text{ million elements}}$.
+    *   In FP16, this is strictly **~2 MB** of VRAM. It remains exactly 2 MB whether generating token 100 or token 100,000. Inference compute is constant time ($O(1)$) and exceptionally fast because the state easily fits in GPU SRAM.
+
+**The Ultimate Trade-off:** The Delta Gate provides a staggering **256x reduction** in memory at 32K context, but it comes at the cost of a 256:1 lossy compression ratio. The "surgical eraser" mechanism of the Delta Rule is doing the heavy lifting to ensure only the most critical information survives that compression.
 
 ---
 
@@ -104,6 +125,10 @@ hardware and batch size configuration. Single coefficient produces stable conver
 by training curves. The auxiliary loss accumulates over layers: with 6 layers, the theoretical
 minimum aux loss is ~6.0 (1.0 per layer for perfectly balanced routing), not 0.
 
+**Delta Gate $L_2$ Normalisation.** Standard Softmax attention squashes values between 0 and 1 natively. Without it, projected keys must be normalised to prevent recursive value explosions in the memory matrix. We apply $L_2$ normalisation via `F.normalize(p=2)` to $Q$ and $K$ (leaving $V$ untouched to preserve semantic payload). This bounds the update rule, guaranteeing $(I - \beta k_t k_t^\top)$ behaves as a stable Householder projection.
+
+**Delta Gate Chunkwise Parallelisation.** Instead of looping over a recurrent first-order state equation, the Delta Gate groups sequence tokens into blocks of size $C$. It calculates intra-chunk causality using the WY representation and Neumann series inversion (`torch.linalg.solve_triangular`) and relies on standard dense matrix multiplication to route the cross-chunk states. This effectively bypasses the linear RNN bottleneck and parallelises the training pass over the sequence length.
+
 ---
 
 ## Scale
@@ -172,11 +197,11 @@ vs 75k steps — approximately 5× fewer training steps for equivalent perplexit
 ---
 
 ## Repository layout
-
-```
+```text
 src/transformer_from_scratch/
 ├── multi_head_attention.py       # Standard MHA
 ├── multi_head_attention_rope.py  # MHA with RoPE + KV cache
+├── delta_gate_layer.py           # Linear attention via chunkwise Delta Rule
 ├── rotary_positional_embeddings.py
 ├── positional_embeddings.py
 ├── rms_norm.py
@@ -222,7 +247,6 @@ broadcasting, transformer block forward pass.
 ---
 
 ## Requirements
-
 ```bash
 uv sync
 # or
@@ -243,6 +267,8 @@ in config.
 - Ainslie et al., *GQA: Training Generalized Multi-Query Transformer Models*, 2023
 - Shazeer et al., *Outrageously Large Neural Networks: The Sparsely-Gated MoE Layer*, 2017
 - Lepikhin et al., *GShard: Scaling Giant Models with Conditional Computation*, 2020
+- Yang et al., *Parallelizing Linear Transformers with the Delta Rule over Sequence Length*, 2024
+- Yang et al., *Gated Delta Networks: Improving Mamba2 with Delta Rule*, 2024
 - Dao et al., *FlashAttention*, 2022 (referenced, not implemented)
 
 ---
@@ -257,3 +283,4 @@ empirical comparisons between architectural variants.
 ---
 
 *Rui Sá Pereira. Built during evenings and weekends, Dec 2025 – Feb 2026.*
+```
