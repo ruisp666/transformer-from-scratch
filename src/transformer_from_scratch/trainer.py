@@ -166,7 +166,7 @@ class Trainer:
 
     def log_sample_text(self):
         """
-        Generates text. Handles tuple returns gracefully.
+        Generates text. Handles tuple returns and chunking requirements gracefully.
         """
         self.model.eval()
         enc = tiktoken.get_encoding("gpt2")
@@ -176,16 +176,35 @@ class Trainer:
         
         for _ in range(50): 
             with torch.no_grad():
-                # Use helper! We only care about logits here.
-                logits, _ = self._forward(x)
+                current_len = x.size(1)
+                
+                # 1. Calculate padding needed to reach a multiple of chunk_size
+                # If seq is 3 and chunk is 64, we need 61 pad tokens.
+                pad_len = (self.cfg.chunk_size - (current_len % self.cfg.chunk_size)) % self.cfg.chunk_size
+                
+                if pad_len > 0:
+                    pad_tensor = torch.zeros((1, pad_len), dtype=torch.long, device=self.device)
+                    x_padded = torch.cat((x, pad_tensor), dim=1)
+                else:
+                    x_padded = x
+
+                # 2. Forward pass with the safely chunkable padded sequence
+                logits, _ = self._forward(x_padded)
+                
+                # 3. Extract the logit for the LAST REAL TOKEN
+                # If length is 3, the last real token is at index 2.
+                next_token_logits = logits[:, current_len - 1, :] 
                 
                 # Standard generation logic
-                # Temperature 0.8: slightly below 1.0 to sharpen the distribution
-                # without collapsing to greedy. Logging only — not used in training.
-                logits = logits[:, -1, :] 
-                probs = torch.nn.functional.softmax(logits / 0.8, dim=-1)
+                probs = torch.nn.functional.softmax(next_token_logits / 0.8, dim=-1)
                 next_token = torch.multinomial(probs, num_samples=1)
+                
+                # 4. Append only the real next token to our sequence (discard padding)
                 x = torch.cat((x, next_token), dim=1)
+                
+        # Decode and print your generated text here!
+        generated_text = enc.decode(x[0].tolist())
+        print(f"\n--- Sample Generation ---\n{generated_text}\n-------------------------")
         
         generated_text = enc.decode(x[0].tolist())
         print(f"\n--- SAMPLE (Step {self.step_num}) ---\n{generated_text}\n---------------------------------------")

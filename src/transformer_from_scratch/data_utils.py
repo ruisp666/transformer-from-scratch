@@ -58,7 +58,8 @@ def get_text_loaders(file_path, batch_size, seq_len, split_ratio=0.9):
         batch_size=batch_size, 
         shuffle=False, 
         num_workers=0, 
-        pin_memory=True
+        pin_memory=True,
+        drop_last=True
     )
 
     return train_loader, val_loader, vocab_size
