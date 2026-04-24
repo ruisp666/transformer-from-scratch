@@ -128,6 +128,10 @@ class DeltaNetLayer(nn.Module):
         # This has bias
         self.W_beta = nn.Linear(d_model, num_heads, bias=True)
 
+        # You need this to stabilize the initialization of the gate (bias close to zero, and weight tight around zeo)
+        torch.nn.init.normal_(self.W_beta.weight, std=0.01)
+        torch.nn.init.constant_(self.W_beta.bias, -3.0)
+
         # ToDo 4: Dropout Layer
 
         self.dropout = nn.Dropout(p=dropout)
@@ -173,8 +177,9 @@ class DeltaNetLayer(nn.Module):
         K = self.W_k(x).view(*split_shape).permute(0, 2, 1, 3)
         V = self.W_v(x).view(*split_shape).permute(0, 2, 1, 3)
 
-        # Transform into 0-1 space
+        # Transform into 0-1 space (explodes without bounds)
         beta  = torch.sigmoid(self.W_beta(x)).permute(0,2,1)
+        beta = torch.clamp(beta, min=1e-5, max=1.0 - 1e-5)
 
         gated_delta_output = self.combine_heads(delta_chunk_attention(Q,K,V,beta,self.chunk_size, mask=None))
 
