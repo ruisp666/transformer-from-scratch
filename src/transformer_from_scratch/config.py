@@ -10,6 +10,10 @@ class TrainingConfig:
     seq_len: int = 256
     dropout: float = 0.1
     expansion_factor: float = 8/3  # Standard for SwiGLU
+
+    # --- Hybrid Hyperparameters for HybridTransformer ---
+    layer_pattern: str = "AAAAAA"  # Default to 6 dense attention layers
+    chunk_size: int = 16           # 256 is cleanly divisible by 16
     
     # --- MoE Hyperparameters (NEW) ---
     # Defaults set for a small MoE run
@@ -30,9 +34,9 @@ class TrainingConfig:
     
     # --- Logging & Checkpoints ---
     run_name: str = "default_run"
-    project_name: str = "llama-scratch-prod"
+    project_name: str = "ablation_net"
     log_interval: int = 10
-    save_interval: int = 500
+    save_interval: int = 50
     eval_interval: int = 500
     
     # --- Data Paths ---
@@ -96,4 +100,20 @@ class TrainingConfig:
             # Run Identity
             run_name="tinystories-moe-4exp",
             input_file_path="data/tinystories_input.txt"
+        )
+    
+
+    @classmethod
+    def tinystories_hybrid(cls, pattern: str, chunk_size: int):
+        """
+        The Hybrid Ablation Run for TinyStories.
+        Automatically syncs n_layers and run_name to the pattern.
+        """
+        return cls(
+            d_model=512, n_layers=len(pattern), n_heads=8, seq_len=256,
+            layer_pattern=pattern.upper(), chunk_size=chunk_size,
+            epochs=1, batch_size=32, lr=3e-4,
+            run_name=f"tiny-{pattern.upper()}", # Auto-naming!
+            input_file_path="data/tinystories_input.txt",
+            n_experts=1 
         )
