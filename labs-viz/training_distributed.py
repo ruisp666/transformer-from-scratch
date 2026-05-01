@@ -29,8 +29,6 @@ def parse_args():
 def main():
 
     args = parse_args()
-    
-   
 
     # 1.1 Dist or single GPU?
     is_distributed = "WORLD_SIZE" in os.environ
@@ -58,11 +56,11 @@ def main():
         print(f"--- Starting Experiment: {cfg.run_name} ---")
         
     # 2. Data
-    train_loader, val_loader, vocab_size = get_text_loaders(
+    train_loader, val_loader, _ = get_text_loaders(
         file_path=cfg.input_file_path,
         batch_size=cfg.batch_size,
         seq_len=cfg.seq_len,
-        rank=local_rank,
+        rank=rank,
         world_size=world_size
     )
     
@@ -93,7 +91,7 @@ def main():
             expansion_factor=cfg.expansion_factor,
             chunk_size=cfg.chunk_size,
             layer_pattern=cfg.layer_pattern
-        ).do(device)
+        ).to(device)
     if is_distributed:
         # This not just moving to device, it deals with the sync across backward pass
         # And manages comms
