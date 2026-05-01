@@ -10,16 +10,18 @@ except ImportError:
     wandb = None
 
 class Trainer:
-    def __init__(self, model, optimizer, train_loader, val_loader, config):
+    def __init__(self, model, optimizer, train_loader, val_loader, config, 
+             rank=0):
         self.model = model
         self.optimizer = optimizer
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.cfg = config
+        self.rank = int(os.environ.get("LOCAL_RANK", rank))
+        self.is_main = self.rank ==0
         
-        # Setup Device
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
-        self.model.to(self.device)
+        # Setup Device(s)
+        self.device = torch.device(f"cuda:{self.rank}" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
         
         self.step_num = 0
         self.tokens_processed = 0
@@ -50,24 +52,33 @@ class Trainer:
         return logits, aux_loss
 
     def train(self):
-        print(f"--- Starting Training on {self.device} ---")
-        print(f"Config: {self.cfg.run_name} | Params: {sum(p.numel() for p in self.model.parameters()):,}")
-        
+        if self.is_main:
+            world_size = int(os.environ.get("WORLD_SIZE", 1))
+            if world_size > 1:
+                print(f"--- Starting Distributed Training | world_size={world_size} | device={self.device} ---")
+            else:
+                print(f"--- Starting Training on {self.device} ---")
+            print(f"Config: {self.cfg.run_name} | Params: {sum(p.numel() for p in self.model.parameters()):,}")
+       
         self.start_time = time.time()
-        if wandb and wandb.run:
+        if wandb and wandb.run and self.is_main:
             wandb.watch(self.model, log="all", log_freq=100)
         
         for epoch in range(self.cfg.epochs):
-            print(f"\nEpoch {epoch + 1}/{self.cfg.epochs}")
+            if self.is_main:
+                 print(f"\nEpoch {epoch + 1}/{self.cfg.epochs}")
+            if hasattr(self.train_loader.sampler, 'set_epoch'):
+                self.train_loader.sampler.set_epoch(epoch)
             self.train_epoch()
             
             # Validation at end of epoch
             val_loss, val_aux_loss = self.evaluate()
-            print(f"End of Epoch {epoch+1} | Val Loss: {val_loss:.4f} | Val Aux Loss: {val_aux_loss:.4f}")
-            
-            self.save_checkpoint(f"epoch_{epoch+1}")
+            if self.is_main:
+                print(f"End of Epoch {epoch+1} | Val Loss: {val_loss:.4f} | Val Aux Loss: {val_aux_loss:.4f}")
+                self.save_checkpoint(f"epoch_{epoch+1}")
 
     def train_epoch(self):
+        
         self.model.train()
         for batch_idx, (x, y) in enumerate(self.train_loader):
             x, y = x.to(self.device), y.to(self.device)
@@ -78,21 +89,25 @@ class Trainer:
             self.step_num += 1
             self.tokens_processed += x.numel()
             
-            if self.step_num % self.cfg.log_interval == 0:
+            if self.step_num % self.cfg.log_interval == 0 and self.is_main:
                 self.log_metrics(loss, aux_loss, grad_norm)
             
             if self.step_num % self.cfg.eval_interval == 0:
-                print(f"\n[Step {self.step_num}] Running Evaluation...")
+                if self.is_main:
+                    print(f"\n[Step {self.step_num}] Running Evaluation...")
+                # TODO: allreduce val_loss across ranks for exact global average
                 val_loss, val_aux_loss = self.evaluate()
-                print(f"Step {self.step_num} | Val Loss: {val_loss:.4f} | Aux Loss: {val_aux_loss:.4f}")
-
-                self.log_sample_text()
+                if self.is_main:
+                    print(f"Step {self.step_num} | Val Loss: {val_loss:.4f} | Aux Loss: {val_aux_loss:.4f}")
+                    self.log_sample_text()
                 
                 # Checkpointing
                 is_milestone = (self.step_num % 5000 == 0)
-                self.save_checkpoint(f"step_{self.step_num}", is_permanent=is_milestone)
+                # one checkpoint saved  by the main?
+                if self.is_main:
+                    self.save_checkpoint(f"step_{self.step_num}", is_permanent=is_milestone)
 
-                if wandb and wandb.run:
+                if wandb and wandb.run and self.is_main:
                     wandb.log({
                         "val_loss": val_loss,
                         "val_aux_loss": val_aux_loss,
@@ -173,7 +188,7 @@ class Trainer:
         # Ensure start_ids is 2D: (1, Seq_Len)
         start_ids = enc.encode("The King said")
         x = torch.tensor([start_ids], dtype=torch.long, device=self.device)
-        
+        raw_model = self.model.module if hasattr(self.model, 'module') else self.model
         for _ in range(50): 
             with torch.no_grad():
                 current_len = x.size(1)
@@ -189,7 +204,7 @@ class Trainer:
                     x_padded = x
 
                 # 2. Forward pass with the safely chunkable padded sequence
-                logits, _ = self._forward(x_padded)
+                logits, _ = raw_model._forward(x_padded)
                 
                 # 3. Extract the logit for the LAST REAL TOKEN
                 # If length is 3, the last real token is at index 2.
@@ -202,10 +217,7 @@ class Trainer:
                 # 4. Append only the real next token to our sequence (discard padding)
                 x = torch.cat((x, next_token), dim=1)
                 
-        # Decode and print your generated text here!
-        generated_text = enc.decode(x[0].tolist())
-        print(f"\n--- Sample Generation ---\n{generated_text}\n-------------------------")
-        
+        # Decode and print generation
         generated_text = enc.decode(x[0].tolist())
         print(f"\n--- SAMPLE (Step {self.step_num}) ---\n{generated_text}\n---------------------------------------")
         
@@ -217,8 +229,9 @@ class Trainer:
 
     def save_checkpoint(self, tag, is_permanent=False):
         Path("checkpoints").mkdir(exist_ok=True)
+        raw_model = self.model.module if hasattr(self.model, 'module') else self.model
         checkpoint = {
-            'model_state_dict': self.model.state_dict(),
+            'model_state_dict': raw_model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
             'config': self.cfg,
             'step': self.step_num
