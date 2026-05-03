@@ -33,14 +33,14 @@ class Trainer:
         if wandb and self.cfg.project_name:
             wandb.init(project=self.cfg.project_name, name=self.cfg.run_name, config=self.cfg.__dict__)
 
-    def _forward(self, x):
+    def _forward(self, model, x):
         """
         Helper to normalize model output.
         Returns: (logits, aux_loss)
         - If Dense: returns (logits, 0.0)
         - If MoE: returns (logits, aux_loss)
         """
-        output = self.model(x)
+        output = model(x)
         
         # Check if the model returned a tuple (MoE style)
         if isinstance(output, tuple):
@@ -118,7 +118,7 @@ class Trainer:
 
     def train_step(self, x, y):
         # 1. Forward (Generic)
-        logits, aux_loss = self._forward(x)
+        logits, aux_loss = self._forward(self.model, x)
 
         # 2. Compute Total Loss
         B, T, V = logits.shape
@@ -151,7 +151,7 @@ class Trainer:
                 x, y = x.to(self.device), y.to(self.device)
                 
                 # Use helper
-                logits, aux_loss = self._forward(x)
+                logits, aux_loss = self._forward(self.model, x)
                 
                 B, T, V = logits.shape
                 ce_loss = torch.nn.functional.cross_entropy(logits.view(-1, V), y.view(-1))
@@ -204,7 +204,7 @@ class Trainer:
                     x_padded = x
 
                 # 2. Forward pass with the safely chunkable padded sequence
-                logits, _ = raw_model._forward(x_padded)
+                logits, _ = self._forward(raw_model,x_padded)
                 
                 # 3. Extract the logit for the LAST REAL TOKEN
                 # If length is 3, the last real token is at index 2.
